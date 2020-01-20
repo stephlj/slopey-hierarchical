@@ -1,0 +1,30 @@
+prior_hypers:
+    flat_time:
+        a: 1.0
+        b: 0.1
+    intensity:
+        a: 1.
+        b: 2.5
+    ch2_transform:
+        slope:
+            a: 3.
+            b: 3.
+        intercept:
+            a: 1.
+            b: 5.
+
+inference:
+    proposal_params:
+        global: 1e3
+        trace:
+            val: 1e3
+            time: 1e3
+        u: 1e3
+        ch2: 1e3
+        sigma: 1e3
+    num_iterations: 100000
+
+camera:
+    # 7.4 fps
+    T_cycle: 0.1356
+    T_blank: 0.0356
