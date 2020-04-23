@@ -10,7 +10,8 @@ import scipy.io
 import yaml
 
 from slopey2 import analyze
-from slopey2.analyze import TraceData
+from slopey2.analyze import TraceData, SamplerState, SlopeyDurationDistn, TraceLatentVars
+from slopey2.trace_mcmc import TraceLatentVars
 
 
 class SkipTrace: pass
@@ -71,47 +72,76 @@ if __name__ == '__main__':
 
   samples = analyze.run_mcmc(config, traces)
   
-  # TODO save samples
+  # Save samples: Steph contemplations:
+  # Current plan is to save results in more or less the same format as my Matlab
+  # plotting code expects, to limit the rewriting of that code that will be needed.
+  # WILL NEED TO REWRITE DEPENDENCE ON MAKE and ability to re-analyze single traces
 
   # Samples is a list of SamplerStates, one for each iteration of the MCMC,
-  # with the first element the initialization.
-  # SamplerState is a named tuple composed of a named tuple, SlopeyDurationDistn,
+  # with the first element the initialization, i.e.
+  # samples = [SamplerState_Init, SamplerState_Iter1, SamplerStateIter2 ...]
+  # Each SamplerState is a named tuple composed of a named tuple, SlopeyDurationDistn,
   # which contains the a and b parameters that parameterize the gamma on slopeys, and
   # a dict of trace_name : TraceLatentVars named tuple key-value pairs.
-  # TraceLatentVars contains a list ['times', 'red_vals', 'time_offset', 
-  # 'green_channel_transform_slope', 'green_channel_transform_intercept', 'camera_noise_sigma']
-  
-  # My old matlab plotting code expects the results of saving a dict via savemat from
-  # scipy.io. The dict was key-value pairs of tracenames and a dict
-  #           {'params': params, 'data': data,
-  #           'times_samples': times_samples, 'vals_samples': vals_samples,
-  #           'u_samples': u_samples, 'ch2_samples': ch2_samples,
-  #           'sigma_samples': sigma_samples} 
-  # When loaded into matlab, the shapes of these dict values were:
-  # times_samples: num_samples+1 by num_slopey+1 array
-  # vals_samples: num_samples+1 by num_slopey array
-  # ch2_samples: num_samples by 2 array
-  # u_samples: num_samples by 1 vector of offsets
-  # And data was num_frames by 2
-  
-  # Plan the first: re-create something similar so I can use my old matlab plotting code
-  # without too much rewriting. The main difference will be each trace file will now 
-  # also contain the a, b parameters for the slopey duration distribution (which will be the
-  # same for all trace files in a directory, because they were analyzed together).
-  
-  # Replace with list comprehensions or equivalent after I get the form down:
-  # I think I also need to import our named tuples or define them at the top?
-  
-  # make empty arrays for times_samples etc same shapes as in my original matlab code
-  # including a list of trace_names
-  
-  for s in samples:
-    # Iterate through samples and pull out the values for this iteration, dump
-    # them in arrays.
-    
-    # do I also want to save the data like I originally did?
-  
+  # TraceLatentVars contains named tuple elemnts 'times', 'red_vals', 'time_offset', 
+  # 'green_channel_transform_slope', 'green_channel_transform_intercept', 'camera_noise_sigma'
+  # So:
+  # samples[0].SlopyDurationDistn.a = a_init
+  # samples[0].SlopyDurationDistn.b = b_init
+  # samples[0].trace_latents["trace_name"].TraceLatentVars.times = initialization of slopey start and end points (translocation_guesses)
+
+  # Will need to get trace_names from traces.keys(), and data from traces.values()
+  # params should be a combination of config and any trace-specific parameters loaded via load_trace_file.
+  # I think for now I'm not going to include trace-specific parameters, but opened an issue about this.
+
+ 
+  trace_names = samples[0].trace_latents.keys()
+
+  trace_vals = []
+  for t in trace_names:
+  	one_trace_vals = {}
+  	one_trace_vals["params"]=config
+  	one_trace_vals["data"]=traces[t].trace_data.frames
+
+    times_samples = np.empty(shape=(len(samples),len(samples[0].trace_latents[t].TraceLatentVars.times)))
+    vals_samples = np.empty(shape=(len(samples),len(samples[0].trace_latents[t].TraceLatentVars.red_vals))) # called red_vals in slopey_hierarchical
+    u_samples = np.empty(shape=(len(samples),1)) # called time_offset in slopey_hierarchical
+    ch2_samples = np.empty(shape=(len(samples),2)) # called green_channel_transform_slope, green_channel_transform_intercept
+    sigma_samples = np.empty(shape=(len(samples),1)) # called camera_noise_sigma in slopey_hierarchical
+    ab_samples = np.empty(shape=(len(samples),2))
+
+    for s in range(0:len(samples)):
+      times_samples[s,:] = samples[s].trace_latents[t].TraceLatentVars.times
+      vals_samples[s,:] = samples[s].trace_latents[t].TraceLatentVars.red_vals
+      u_samples[s] = samples[s].trace_latents[t].TraceLatentVars.time_offset
+      # STEPH TO DO does matlab expect slope, intercept for ch2_samples?
+      ch2_samples[s,:] = np.array([samples[s].trace_latents[t].TraceLatentVars.green_channel_transform_slope,
+                                   samples[s].trace_latents[t].TraceLatentVars.green_channel_transform_intercept
+                           ]
+                         )
+      sigma_samples[s] = samples[s].trace_latents[t].TraceLatentVars.camera_noise_sigma
+      ab_samples[s,:] = np.array([samples[s].SlopyDurationDistn.a, samples[s].SlopyDurationDistn.b])
+
+    one_trace_vals["times_samples"] = times_samples
+    one_trace_vals["vals_samples"] = vals_samples
+    one_trace_vals["u_samples"] = u_samples
+    one_trace_vals["ch2_samples"] = ch2_samples
+    one_trace_vals["sigma_samples"] = sigma_samples
+    one_trace_vals["ab_samples"] = ab_samples
+
+    trace_vals.append(one_trace_vals)
+
   all_results = dict(t: v for t, v in zip(trace_names, trace_vals)
+  	  # trace_vals is a list/iterable of dicts. 
+  	  # Each trace_vals dict has (key, value pairs):
+  	  #    'params': analysis parameters, probably a dict?
+  	  #    'data': numframesx2 array or equivalent
+  	  #    'times_samples': num_samples+1 by num_slopey+1 array
+  	  #    'vals_samples': num_samples+1 by num_slopey+1 array
+  	  #    'u_samples': num_samples by 1 array
+  	  #    'ch2_samples': num_samples by 2
+  	  #    'sigma_samples': num_samples by 1
+  	  #.   'ab_samples': global slopey distribution parameters, same values for all dicts in trace_vals
   
   
   
